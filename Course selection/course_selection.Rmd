@@ -10,76 +10,58 @@ library(tidyverse)
 library(arules)
 library(arulesViz)
 library(janitor)
-library(ggplot2)
 ```
 
 ```{r}
 optional_course_choices <- read.csv("dsti_course_enrolments.csv") %>% 
   clean_names() %>% 
-  filter(course_status == "O") %>% 
-  select(uun, course_code) %>% 
-  unique()
+  filter(course_status == "O") %>% #selecting only optional courses
+  unique() # some students have retaken classes so same data is appearing twice, filtering out any duplicates
 ```
 
 ```{r}
-optional_course_choice_transaction <- optional_course_choices %>% 
+optional_course_transactions <- optional_course_choices %>% 
   group_by(uun) %>%
   summarise(courses = paste(course_code, collapse = " ")) %>%
   ungroup() %>% 
-  mutate(row_number = row_number(), .after = uun) %>% 
   select(courses)
-
+# formatting in preparation to turn to list
 ```
 
 ```{r}
-optional_course_choices_wide <- optional_course_choices %>% 
-  mutate(course_number = row_number()) %>%
-  pivot_wider(names_from = course_number, 
-              values_from = course_code, 
-              names_prefix = "course ") %>% 
-  mutate(row_number = row_number(), .after = uun) %>% 
-  select(-uun)
-  
-```
-
-
-```{r}
-optional_course_choices_logical <- optional_course_choices %>% 
-  mutate(enrolled = TRUE) %>%
-  pivot_wider(names_from = course_code, 
-              values_from = enrolled) %>% 
-  replace(is.na(.), FALSE) %>% 
-  mutate(row_number = row_number(), .after = uun) %>% 
-  select(-uun)
-```
-
-```{r}
-
-course_list <- lapply(1:nrow(optional_course_choice_transaction), 
+course_list <- lapply(1:nrow(optional_course_transactions), 
                       function(i) {
-  unlist(strsplit(unlist(optional_course_choice_transaction[i, ]), " "))
-})
+                        unlist(strsplit(
+                          unlist(optional_course_transactions[i, ]), 
+                          " "))
+                      }
+)
 
-names(course_list) <- paste("Tr",c(1:344), sep = "")
+names(course_list) <- paste("Transaction", 
+                            seq_along(course_list), 
+                            sep = "")
+# saving data in list so can be transformed into transaction type for apriori analysis
 ```
 
 ```{r}
 course_transactions <- as(course_list, "transactions")
+# transforming to transaction type for apriori analysis
 ```
 
 ```{r}
-model <- apriori(course_transactions) # creating model based on deafault
-# support of 10% and confidence of 80% - only 2 rules created
+model <- apriori(course_transactions) # creating model based on default
+# support of 10% and confidence of 80% - only 8 rules created
 ```
 
 ```{r}
 model2 <- apriori(course_transactions, 
-                  parameter = list(confidence = 0.01,
+                  parameter = list(confidence = 0.25,
                                    support = 0.05,
                                    minlen = 2))
+# adjusting confidence and support intervals to rate which produces helpful number of rules
 ```
 ```{r}
-inspect(model2)
+inspect(model2) # reveiwing rules from adjusted model
 ```
 
 ```{r}
@@ -87,6 +69,52 @@ plot(model2)
 ```
 
 ```{r}
-itemFrequencyPlot(course_transactions, topN = 10)
+
+course_selection_results <- as(model2, "data.frame") %>% 
+  filter(lift > 1)
+# creating data frame for usable results. Keeping only rules where lift > 1, i.e. positive association
+
 ```
 
+```{r}
+course_selection_results <- course_selection_results %>%
+  separate(rules, into = c("course_1", "course_2"), 
+           sep = " => ",
+           remove = FALSE) %>% 
+ mutate(course_1 = str_replace_all(course_1, "\\{|\\}", ""),
+        course_2 = str_replace_all(course_2, "\\{|\\}", "")
+ ) %>% # tidying data frame for more usable format
+  filter(!grepl(",", course_1))
+# keeping only simple 1 to 1 associations
+        
+```        
+        
+```{r}
+course_names_schools <- optional_course_choices %>% 
+  select(school_including_epcc, course_code, course_name) %>% 
+  unique()
+
+# creating unique list of course codes with name and school, ready for joining with course_selection_results
+```
+
+```{r}
+final_results <- course_selection_results %>% 
+  left_join(course_names_schools,
+            by = c("course_1" = "course_code")) %>% 
+  rename(school_1 = school_including_epcc,
+         course_name_1 = course_name) %>% 
+  left_join(course_names_schools,
+            by = c("course_2" = "course_code")) %>% 
+    rename(school_2 = school_including_epcc,
+         course_name_2 = course_name)
+# joining and tidying data to make more user friendly
+
+```
+
+```{r}
+final_results %>% 
+  write_csv("course_selection_results.csv")
+```
+
+        
+        
