@@ -5,9 +5,88 @@ editor_options:
   chunk_output_type: inline
 ---
 
-
 ```{r}
 library(tidyverse)
 library(arules)
+library(arulesViz)
+library(janitor)
+library(ggplot2)
+```
+
+```{r}
+optional_course_choices <- read.csv("dsti_course_enrolments.csv") %>% 
+  clean_names() %>% 
+  filter(course_status == "O") %>% 
+  select(uun, course_code) %>% 
+  unique()
+```
+
+```{r}
+optional_course_choice_transaction <- optional_course_choices %>% 
+  group_by(uun) %>%
+  summarise(courses = paste(course_code, collapse = " ")) %>%
+  ungroup() %>% 
+  mutate(row_number = row_number(), .after = uun) %>% 
+  select(courses)
+
+```
+
+```{r}
+optional_course_choices_wide <- optional_course_choices %>% 
+  mutate(course_number = row_number()) %>%
+  pivot_wider(names_from = course_number, 
+              values_from = course_code, 
+              names_prefix = "course ") %>% 
+  mutate(row_number = row_number(), .after = uun) %>% 
+  select(-uun)
+  
+```
+
+
+```{r}
+optional_course_choices_logical <- optional_course_choices %>% 
+  mutate(enrolled = TRUE) %>%
+  pivot_wider(names_from = course_code, 
+              values_from = enrolled) %>% 
+  replace(is.na(.), FALSE) %>% 
+  mutate(row_number = row_number(), .after = uun) %>% 
+  select(-uun)
+```
+
+```{r}
+
+course_list <- lapply(1:nrow(optional_course_choice_transaction), 
+                      function(i) {
+  unlist(strsplit(unlist(optional_course_choice_transaction[i, ]), " "))
+})
+
+names(course_list) <- paste("Tr",c(1:344), sep = "")
+```
+
+```{r}
+course_transactions <- as(course_list, "transactions")
+```
+
+```{r}
+model <- apriori(course_transactions) # creating model based on deafault
+# support of 10% and confidence of 80% - only 2 rules created
+```
+
+```{r}
+model2 <- apriori(course_transactions, 
+                  parameter = list(confidence = 0.01,
+                                   support = 0.05,
+                                   minlen = 2))
+```
+```{r}
+inspect(model2)
+```
+
+```{r}
+plot(model2)
+```
+
+```{r}
+itemFrequencyPlot(course_transactions, topN = 10)
 ```
 
